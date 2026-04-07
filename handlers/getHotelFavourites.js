@@ -1,29 +1,23 @@
 import { v4 as uuidv4 } from "uuid";
-import { globalHeaders, logTrace, getSessionId } from "../helper/helper.js";
+import { globalHeaders, logTrace, getSessionId, createResponse, setRequestContext, logError } from "../helper/helper.js";
 import { verifyToken } from "./authorizerLayer.js";
 import { DynamoDBClient, QueryCommand } from "@aws-sdk/client-dynamodb";
 import { unmarshall } from "@aws-sdk/util-dynamodb";
 const dynamo = new DynamoDBClient({ region: process.env.REGION });
 
-export const handler = async (event) => {
+export const handler = async (event, context) => {
+    setRequestContext(event, context);
+    
     try {
         // --- Token Verification ---
         const authVerification = await verifyToken(event);
         if (authVerification?.principalId === "unknown") {
-            return {
-                ...globalHeaders(),
-                statusCode: 401,
-                body: JSON.stringify({ message: "Unauthorized: Invalid or expired token" }),
-            };
+            return createResponse(401, { message: "Unauthorized: Invalid or expired token" });
         }
 
         const { sessionId } = await getSessionId(authVerification?.context?.sub);
         if (!sessionId) {
-            return {
-                ...globalHeaders(),
-                statusCode: 500,
-                body: JSON.stringify({ message: "Login failed, no sessionId returneds." }),
-            };
+            return createResponse(500, { message: "Login failed, no sessionId returned." });
         }
 
         const queryCmd = new QueryCommand({
@@ -51,18 +45,20 @@ export const handler = async (event) => {
 
         await logTrace(payload);
 
-
-        return { statusCode: 200, ...globalHeaders(), body: JSON.stringify(items) };
+        return createResponse(200, items);
 
     } catch (error) {
-        console.error("Error in Add Hotel Favourites:", error.response?.data || error.message, error.stack);
-        return {
-            statusCode: 500,
-            headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true },
-            body: JSON.stringify({
-                message: error.response?.data || "Internal Server Error",
-                error: error.response?.data || error.message,
-            }),
-        };
+        console.error("Error in Get Hotel Favourites:", error.response?.data || error.message, error.stack);
+        
+        await logError(error, {
+            function: 'getHotelFavourites',
+            event: JSON.stringify(event)
+        });
+        
+        return createResponse(500, {
+            message: error.response?.data || "Internal Server Error",
+            error: error.response?.data || error.message,
+            stack: error.stack
+        });
     }
 };
