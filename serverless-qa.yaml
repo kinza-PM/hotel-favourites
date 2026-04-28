@@ -51,7 +51,8 @@ provider:
             - dynamodb:DeleteItem
           Resource:
             - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/HotelFavourites-${self:provider.stage}
-            - arn:aws:dynamodb:eu-west-1:${aws:accountId}:table/HotelFavourites-${self:provider.stage}/index/userId-index       
+            - arn:aws:dynamodb:eu-west-1:${aws:accountId}:table/HotelFavourites-${self:provider.stage}/index/userId-index
+            - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/HotelFavourites-${self:provider.stage}/index/userId-hotel-index           
 
   environment:
     STAGE: ${self:provider.stage}
@@ -195,7 +196,16 @@ resources:
               - AttributeName: userId
                 KeyType: HASH
             Projection:
-              ProjectionType: ALL   
+              ProjectionType: ALL
+
+          - IndexName: userId-hotel-index
+            KeySchema:
+              - AttributeName: userId
+                KeyType: HASH
+              - AttributeName: hotelKey
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL       
 
 
 plugins:

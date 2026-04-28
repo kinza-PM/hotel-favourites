@@ -14,7 +14,7 @@ export const handler = async (event, context) => {
         if (authVerification?.principalId === "unknown") {
             return createResponse(401, { message: "Unauthorized: Invalid or expired token" });
         }
-
+        const city = event.queryStringParameters?.city; 
         const { sessionId } = await getSessionId(authVerification?.context?.sub);
         if (!sessionId) {
             return createResponse(500, { message: "Login failed, no sessionId returned." });
@@ -32,7 +32,19 @@ export const handler = async (event, context) => {
         const result = await dynamo.send(queryCmd);
         const items = result.Items ? result.Items.map(item => unmarshall(item)) : [];
 
-        console.log("result*********", items);
+        let filteredItems = items;
+
+        if (city) {
+            filteredItems = items.filter(item => item.city === city);
+        }
+
+        const grouped = filteredItems.reduce((acc, item) => {
+            const c = item.city;
+            if (!acc[c]) acc[c] = [];
+            acc[c].push(item);
+            return acc;
+        }, {});
+
         const payload = {
             id: uuidv4(),
             userId: authVerification?.context?.sub,

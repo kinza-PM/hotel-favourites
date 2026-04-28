@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { globalHeaders, logTrace, getSessionId, createResponse, setRequestContext, logError } from "../helper/helper.js";
 import { verifyToken } from "./authorizerLayer.js";
-import { DynamoDBClient, PutItemCommand, GetItemCommand, DeleteItemCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, PutItemCommand, QueryCommand, DeleteItemCommand } from "@aws-sdk/client-dynamodb";
 const dynamo = new DynamoDBClient({ region: process.env.REGION });
 
 export const handler = async (event, context) => {
@@ -16,7 +16,7 @@ export const handler = async (event, context) => {
 
         const body = typeof event.body === "string" ? JSON.parse(event.body) : event.body;
         const conversationId = uuidv4();
-        const { searchKey, hotelKey, propertyInfo, rooms, totalPrice, flag } = body
+        const { searchKey, hotelKey, propertyInfo, rooms, totalPrice, flag, city } = body
         // --- Session ID from Provesio ---
         const { sessionId } = await getSessionId(authVerification?.context?.sub, searchKey);
         if (!sessionId) {
@@ -24,8 +24,12 @@ export const handler = async (event, context) => {
         }
 
         // Validate required fields
-        if (!searchKey || !hotelKey || !propertyInfo || !rooms || !totalPrice) {
-            return createResponse(400, { message: "Missing required fields: searchKey, hotelKey, propertyInfo, rooms, totalPrice." });
+        if (!searchKey || !hotelKey || !propertyInfo || !rooms || !totalPrice || !city) {
+            return {
+                ...globalHeaders(),
+                statusCode: 400,
+                body: JSON.stringify({ message: "Missing required fields: searchKey, hotelKey, propertyInfo, rooms, totalPrice, city." }),
+            };
         }
 
         // Validate propertyInfo is an object
@@ -42,21 +46,26 @@ export const handler = async (event, context) => {
             return createResponse(500, { message: "Login failed, no conversationId returned." });
         }
 
-        const getHotelFavourite = new GetItemCommand({
+        const query = new QueryCommand({
             TableName: process.env.HOTEL_FAVOURITES_TABLE,
-            Key: {
-                hotelKey: { S: hotelKey },
-                roomKey: { S: rooms[0].roomKey }
-            }
+            IndexName: "userId-hotel-index",
+            KeyConditionExpression: "userId = :u AND hotelKey = :k",
+            ExpressionAttributeValues: {
+                ":u": { S: authVerification?.context?.sub },
+                ":k": { S: hotelKey }
+            },
+            Limit: 1
         });
-        const result = await dynamo.send(getHotelFavourite);
+        const result = await dynamo.send(query);
         console.log("result*********", result);
         if (flag) {
-            if (result.Item) {
-                return createResponse(422, { message: "User has already added this room to favourites" });
+
+            if (result.Items && result.Items.length > 0) {
+                return { statusCode: 422, ...globalHeaders(), body: JSON.stringify({ message: "User has already added this room to favourites" }) };
             }
-        } else {
-            if (result.Item) {
+        }
+        else {
+            if (result.Items && result.Items.length > 0) {
                 const deleteHotelFavourite = new DeleteItemCommand({
                     TableName: process.env.HOTEL_FAVOURITES_TABLE,
                     Key: {
@@ -86,6 +95,7 @@ export const handler = async (event, context) => {
             // 👤 User info (optional, if needed)
             userId: { S: authVerification?.context?.sub },
             userType: { S: authVerification?.context?.userType },
+            city: { S: city },
             // 📌 Meta
             createdAt: { S: new Date().toISOString() },
             updatedAt: { S: new Date().toISOString() }
